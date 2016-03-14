@@ -98,12 +98,13 @@ metabolite_RA %<>% ungroup %>% mutate(Metabolite = factor(Metabolite, levels = c
 hm_theme <- theme_minimal() + theme(axis.text = element_text(size = 20), panel.grid = element_blank(),
                                     axis.title = element_blank(), legend.key.size = unit(1, "inches"),
                                     legend.text = element_text(size = 25), legend.title = element_text(size = 25),
-                                    axis.text.x = element_text(angle = 90, hjust = 1))
+                                    axis.text.x = element_text(angle = 90, hjust = 1),
+                                    legend.position = "none")
 
-ggplot(metabolite_RA, aes(x = Sample_ID, y = Metabolite, fill = TN_diff)) + geom_tile() +
+metHM <- ggplot(metabolite_RA, aes(x = Sample_ID, y = Metabolite, fill = TN_diff)) + geom_tile() +
   scale_fill_gradient2("log2 concentration\nin tumor relative\nto benign", low = "green2", mid = "black", high = "firebrick1",
-                       midpoint = 0, guide = "colourbar", breaks = seq(-3, 3, by = 1), labels = c("< -3", "-2", "-1", "0", "1", "2", "> 3")) + hm_theme
-ggsave("analysis/metabolite_mutation_overlap/metaboliteHM.pdf", height = 16, width = 15)
+                       midpoint = 0, guide = "colourbar", breaks = seq(-3, 3, by = 1), labels = c("< -3", "-2", "-1", "0", "1", "2", "> 3")) + hm_theme +
+  theme(axis.text.x = element_blank())
 
 # Add in mutations
 
@@ -116,9 +117,9 @@ mutation_mutationlist_subset <- mutation_mutationlist %>%
   select(Sample_ID = `Alternate ID`, Gene = `Gene Symbol`, Frac = `Mutant Tags (%)`) %>%
   filter(Sample_ID %in% shared_IDs) %>% unique %>%
   filter(Gene %in% genes_of_interest) %>%
-  mutate(Gene = ifelse(Gene %in% c("MLL3", "MLL2", "MLL"), "MLL", Gene)) %>%
-  ungroup %>% mutate(Gene = factor(Gene, levels = c("TP53", "TGFBR2", "SMAD4", "KRAS", "CDKN2A", "ARID1A", "MLL"))) %>%
-  #ungroup %>% mutate(Gene = factor(Gene, levels = rev(genes_of_interest))) %>%
+  #mutate(Gene = ifelse(Gene %in% c("MLL3", "MLL2", "MLL"), "MLL", Gene)) %>%
+  #ungroup %>% mutate(Gene = factor(Gene, levels = c("TP53", "TGFBR2", "SMAD4", "KRAS", "CDKN2A", "ARID1A", "MLL"))) %>%
+  ungroup %>% mutate(Gene = factor(Gene, levels = rev(genes_of_interest))) %>%
   #group_by(Gene) %>% filter(n() >= mutation_cutoff) %>%
   #ungroup %>% mutate(Gene = factor(Gene, levels = Gene %>% table %>% data.frame %>%
   #                                   arrange(Freq) %>% select(1) %>% unlist)) %>%
@@ -135,18 +136,46 @@ all_mutation_gene_pairs <- expand.grid(Sample_ID = clustered_samples %>% unlist,
 all_mutation_gene_pairs <- rbind(mutation_mutationlist_subset, all_mutation_gene_pairs) %>%
   mutate(Sample_ID = factor(Sample_ID, levels = clustered_samples$Sample_ID))
 
-ggplot(all_mutation_gene_pairs, aes(x = Sample_ID, y = Gene, fill = Frac)) + geom_tile(color = "black") +
-  
-  
-  
-  scale_fill_manual(values = c("WT" = "white", "mutant" = "black")) + hm_theme
-ggsave("analysis/metabolite_mutation_overlap/mutationHM.pdf", height = 6, width = 12)
+mutHM <- ggplot(all_mutation_gene_pairs, aes(x = Sample_ID, y = Gene, fill = Frac)) + geom_tile(color = "black") + hm_theme +
+  theme(axis.text.x = element_blank())
 
- 
+
+### Make a big heatmap
+
+theme_none <- theme(
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  panel.background = element_blank(),
+  axis.title.x = element_text(colour=NA),
+  axis.title.y = element_blank(),
+  axis.text.x = element_blank(),
+  axis.text.y = element_blank(),
+  axis.line = element_blank(),
+  axis.ticks = element_blank()
+)
+
+feature_dendro <- ggplot(ggdendro::segment(ggdendro::dendro_data(as.dendrogram(cluster_features)))) +
+  geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) +
+  theme_none + coord_flip()
+
+sample_dendro <- ggplot(ggdendro::segment(ggdendro::dendro_data(as.dendrogram(cluster_samples)))) +
+  geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) +
+  theme_none
+
+library(grid)
+
+pdf("analysis/metabolite_mutation_overlap/combinedHM.pdf", height = 20, width = 20)
+grid::grid.newpage()
+print(metHM, vp=viewport(0.6, 0.7, x=0.4, y=0.35))
+print(mutHM, vp=viewport(0.4, 0.2, x=0.48, y=0.8))
+print(sample_dendro, vp=viewport(0.52, 0.1, x=0.45, y=0.95))
+print(feature_dendro, vp=viewport(0.1, 0.7, x=0.8, y=0.35))
+dev.off()
+
+
 ### Stratify by mutations
 
 all_met_genes <- metabolite_RA %>% left_join(all_mutation_gene_pairs, by = "Sample_ID")
-
 
 ggplot(all_met_genes, aes(x = Sample_ID, y = Metabolite, fill = TN_diff)) + facet_grid(Gene ~ mutated) + geom_tile() +
   scale_fill_gradient2("log2 concentration\nin tumor relative\nto benign", low = "green2", mid = "black", high = "firebrick1",
