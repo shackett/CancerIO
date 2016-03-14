@@ -40,6 +40,22 @@ metabolite_RA <- metabolite_metaboliteQuant %>%
   group_by(Metabolite) %>%
   filter(sum(is.na(TN_diff)) < n()/2) # remove poorly measured metabolites
 
+# instead use PCs
+
+#metabolite_RA <- metabolite_metaboliteQuant %>%
+#  group_by(Sample_ID, Metabolite) %>%
+#  summarize(TN_diff = log2RA[Status == "Tumor"] - log2RA[Status == "Normal"]) %>%
+#  group_by(Metabolite) %>%
+#  filter(sum(is.na(TN_diff)) < n()/2) %>%
+#  spread(Sample_ID, TN_diff) 
+
+#rownames(metabolite_RA) <- metabolite_RA$Metabolite
+#metabolite_RA %<>% ungroup %>% select(-Metabolite) %>% as.matrix %>% apply(c(1,2), as.numeric)
+
+#cluster::clara(metabolite_RA, k = 10)$medoids
+
+
+
 # load previously identified metabolite which differ b/w tumor and benign
 
 TNdiscoveries <- read.delim("software/data/metabolomics_data/TNdiscoveriesRenamed.tsv")
@@ -92,13 +108,20 @@ ggsave("analysis/metabolite_mutation_overlap/metaboliteHM.pdf", height = 16, wid
 # Add in mutations
 
 mutation_cutoff = 4
+genes_of_interest <- c("MLL3", "MLL2", "MLL", "ARID1A", "CDKN2A", "KRAS", "SMAD4", "TGFBR2", "TP53")
+
+#mutation_mutationlist %>% count(`Gene Symbol`) %>% filter(`Gene Symbol` %in% genes_of_interest)
 
 mutation_mutationlist_subset <- mutation_mutationlist %>%
-  select(Sample_ID = `Alternate ID`, Gene = `Gene Symbol`) %>%
+  select(Sample_ID = `Alternate ID`, Gene = `Gene Symbol`, Frac = `Mutant Tags (%)`) %>%
   filter(Sample_ID %in% shared_IDs) %>% unique %>%
-  group_by(Gene) %>% filter(n() >= mutation_cutoff) %>%
-  ungroup %>% mutate(Gene = factor(Gene, levels = Gene %>% table %>% data.frame %>%
-                                     arrange(Freq) %>% select(1) %>% unlist)) %>%
+  filter(Gene %in% genes_of_interest) %>%
+  mutate(Gene = ifelse(Gene %in% c("MLL3", "MLL2", "MLL"), "MLL", Gene)) %>%
+  ungroup %>% mutate(Gene = factor(Gene, levels = c("TP53", "TGFBR2", "SMAD4", "KRAS", "CDKN2A", "ARID1A", "MLL"))) %>%
+  #ungroup %>% mutate(Gene = factor(Gene, levels = rev(genes_of_interest))) %>%
+  #group_by(Gene) %>% filter(n() >= mutation_cutoff) %>%
+  #ungroup %>% mutate(Gene = factor(Gene, levels = Gene %>% table %>% data.frame %>%
+  #                                   arrange(Freq) %>% select(1) %>% unlist)) %>%
   mutate(mutated = "mutant")
   
 # add on categories where mutation is missing
@@ -107,14 +130,24 @@ all_mutation_gene_pairs <- expand.grid(Sample_ID = clustered_samples %>% unlist,
                                        Gene = unique(mutation_mutationlist_subset$Gene), stringsAsFactors = F) %>%
   mutate(Gene = factor(Gene, levels = levels(mutation_mutationlist_subset$Gene))) %>%
   anti_join(mutation_mutationlist_subset, by = c("Sample_ID", "Gene")) %>%
-  mutate(mutated = "WT")
+  mutate(mutated = "WT") %>% mutate(Frac = NA)
 
 all_mutation_gene_pairs <- rbind(mutation_mutationlist_subset, all_mutation_gene_pairs) %>%
   mutate(Sample_ID = factor(Sample_ID, levels = clustered_samples$Sample_ID))
 
-ggplot(all_mutation_gene_pairs, aes(x = Sample_ID, y = Gene, fill = mutated)) + geom_tile(color = "black") +
+ggplot(all_mutation_gene_pairs, aes(x = Sample_ID, y = Gene, fill = Frac)) + geom_tile(color = "black") +
+  
+  
+  
   scale_fill_manual(values = c("WT" = "white", "mutant" = "black")) + hm_theme
 ggsave("analysis/metabolite_mutation_overlap/mutationHM.pdf", height = 6, width = 12)
 
  
+### Stratify by mutations
 
+all_met_genes <- metabolite_RA %>% left_join(all_mutation_gene_pairs, by = "Sample_ID")
+
+
+ggplot(all_met_genes, aes(x = Sample_ID, y = Metabolite, fill = TN_diff)) + facet_grid(Gene ~ mutated) + geom_tile() +
+  scale_fill_gradient2("log2 concentration\nin tumor relative\nto benign", low = "green2", mid = "black", high = "firebrick1",
+                       midpoint = 0, guide = "colourbar", breaks = seq(-3, 3, by = 1), labels = c("< -3", "-2", "-1", "0", "1", "2", "> 3")) + hm_theme
